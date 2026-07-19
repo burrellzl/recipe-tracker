@@ -22,6 +22,9 @@
 
   function toast(message, type = 'info') {
     const region = document.getElementById('toast-region');
+    [...region.children].forEach((item) => {
+      if (item.textContent === message) item.remove();
+    });
     const element = document.createElement('div');
     element.className = `toast toast-${type}`;
     element.textContent = message;
@@ -114,6 +117,16 @@
     return total / servings;
   }
 
+  function costPreviewText(totalValue, servingsValue) {
+    if (totalValue === '' && servingsValue === '') return 'Cost not entered';
+    if (totalValue !== '' && servingsValue === '') return 'Enter actual servings';
+    if (totalValue === '' && servingsValue !== '') return 'Enter total cost';
+    const total = Number(totalValue);
+    const servings = Number(servingsValue);
+    if (!Number.isFinite(total) || total < 0 || !Number.isFinite(servings) || servings <= 0) return 'Check cost values';
+    return U.formatCurrency(total / servings);
+  }
+
   function getFilteredRecipes() {
     const search = state.search.trim().toLowerCase();
     let recipes = state.recipes.filter((recipe) => {
@@ -196,7 +209,7 @@
 
   function blankDraft() {
     return {
-      title: '', description: '', category: '', prep_minutes: 0, cook_minutes: 0,
+      title: '', description: '', category: '', total_minutes: 0,
       default_servings: 4, notes: '', total_cost: '', actual_servings: '', cost_notes: '',
       is_favorite: false, image_path: null, image_url: null, imageFile: null, removeImage: false,
       ingredients: [{ quantity: 1, unit: '', name: '', note: '' }],
@@ -207,6 +220,7 @@
   function draftFromRecipe(recipe) {
     return {
       ...recipe,
+      total_minutes: Number(recipe.prep_minutes || 0) + Number(recipe.cook_minutes || 0),
       total_cost: recipe.total_cost ?? '',
       actual_servings: recipe.actual_servings ?? '',
       imageFile: null,
@@ -259,9 +273,7 @@
     state.formDraft = draft;
     state.formRecipeId = recipeId;
     const editing = Boolean(recipeId);
-    const currentCost = draft.total_cost !== '' && draft.actual_servings !== '' && Number(draft.actual_servings) > 0
-      ? U.formatCurrency(Number(draft.total_cost) / Number(draft.actual_servings))
-      : 'Cost not entered';
+    const currentCost = costPreviewText(draft.total_cost, draft.actual_servings);
     app.innerHTML = `
       <section class="page form-page">
         <div class="form-page-heading"><a class="back-link" href="${editing ? `#/recipe/${recipeId}` : '#/'}">← Cancel</a><div><span class="eyebrow">${editing ? 'Update recipe' : 'New recipe'}</span><h1>${editing ? 'Edit recipe' : 'Add a recipe'}</h1></div></div>
@@ -272,8 +284,7 @@
               <label>Category<input name="category" value="${U.escapeHTML(draft.category || '')}" maxlength="60" placeholder="Dinner"></label>
               <label class="checkbox-label"><input name="is_favorite" type="checkbox" ${draft.is_favorite ? 'checked' : ''}> Mark as favorite</label>
               <label class="field-span-2">Description<textarea name="description" rows="3" maxlength="1000" placeholder="A quick description of the recipe…">${U.escapeHTML(draft.description || '')}</textarea></label>
-              <label>Prep time (minutes)<input name="prep_minutes" type="number" inputmode="numeric" min="0" step="1" value="${U.escapeHTML(draft.prep_minutes || 0)}" required></label>
-              <label>Cook time (minutes)<input name="cook_minutes" type="number" inputmode="numeric" min="0" step="1" value="${U.escapeHTML(draft.cook_minutes || 0)}" required></label>
+              <label>Total time (minutes)<input name="total_minutes" type="number" inputmode="numeric" min="0" step="1" value="${U.escapeHTML(draft.total_minutes || 0)}" required></label>
               <label>Default servings<input name="default_servings" type="number" inputmode="decimal" min="0.01" step="any" value="${U.escapeHTML(draft.default_servings)}" required></label>
             </div>
           </section>
@@ -297,10 +308,10 @@
             <div id="direction-form-list" class="form-list">${draft.directions.map((step, index) => directionRow(step, index, draft.directions.length)).join('')}</div>
           </section>
 
-          <section class="form-section"><h2>Cost per serving</h2><p>Cost details are optional. Enter both values when you want a calculation.</p>
+          <section class="form-section"><h2>Cost per serving</h2><p>Cost details are optional. When you enter a cost, actual servings starts with the default serving count—change it if the recipe produced a different amount.</p>
             <div class="field-grid cost-fields">
-              <label>Total recipe cost ($)<input name="total_cost" type="number" inputmode="decimal" min="0" step="0.01" value="${U.escapeHTML(draft.total_cost)}" placeholder="24.00"></label>
-              <label>Actual servings produced<input name="actual_servings" type="number" inputmode="decimal" min="0.01" step="any" value="${U.escapeHTML(draft.actual_servings)}" placeholder="8"></label>
+              <label>Total recipe cost ($)<input name="total_cost" type="number" inputmode="decimal" min="0" step="0.01" value="${U.escapeHTML(draft.total_cost)}" placeholder="Enter cost"></label>
+              <label>Actual servings produced<input name="actual_servings" type="number" inputmode="decimal" min="0.01" step="any" value="${U.escapeHTML(draft.actual_servings)}" placeholder="Enter servings"></label>
               <div class="cost-preview"><span>Cost per serving</span><strong id="cost-preview">${currentCost}</strong></div>
               <label class="field-span-2">Optional cost notes<textarea name="cost_notes" rows="2" placeholder="Bought in bulk, already owned the spices…">${U.escapeHTML(draft.cost_notes || '')}</textarea></label>
             </div>
@@ -321,7 +332,7 @@
     const data = new FormData(form);
     Object.assign(state.formDraft, {
       title: data.get('title') || '', description: data.get('description') || '', category: data.get('category') || '',
-      prep_minutes: data.get('prep_minutes'), cook_minutes: data.get('cook_minutes'), default_servings: data.get('default_servings'),
+      total_minutes: data.get('total_minutes'), default_servings: data.get('default_servings'),
       notes: data.get('notes') || '', total_cost: data.get('total_cost'), actual_servings: data.get('actual_servings'),
       cost_notes: data.get('cost_notes') || '', is_favorite: data.has('is_favorite'), removeImage: data.has('remove_image')
     });
@@ -340,12 +351,15 @@
   }
 
   function recipePayload(recipe, imagePath = recipe.image_path) {
+    const totalMinutes = recipe.total_minutes === undefined
+      ? Number(recipe.prep_minutes || 0) + Number(recipe.cook_minutes || 0)
+      : Number(recipe.total_minutes || 0);
     return {
       title: String(recipe.title || '').trim(),
       description: String(recipe.description || '').trim() || null,
       category: String(recipe.category || '').trim() || null,
-      prep_minutes: Number(recipe.prep_minutes || 0),
-      cook_minutes: Number(recipe.cook_minutes || 0),
+      prep_minutes: 0,
+      cook_minutes: totalMinutes,
       default_servings: Number(recipe.default_servings),
       notes: String(recipe.notes || '').trim() || null,
       total_cost: recipe.total_cost === '' || recipe.total_cost === null ? null : Number(recipe.total_cost),
@@ -375,7 +389,7 @@
   function validateDraft(draft) {
     if (!draft.title.trim()) return 'Enter a recipe title.';
     if (!Number.isFinite(Number(draft.default_servings)) || Number(draft.default_servings) <= 0) return 'Default servings must be greater than zero.';
-    if (!Number.isInteger(Number(draft.prep_minutes)) || Number(draft.prep_minutes) < 0 || !Number.isInteger(Number(draft.cook_minutes)) || Number(draft.cook_minutes) < 0) return 'Prep and cook time must be whole numbers of zero or more.';
+    if (!Number.isInteger(Number(draft.total_minutes)) || Number(draft.total_minutes) < 0) return 'Total time must be a whole number of zero or more.';
     if (!draft.ingredients.length || draft.ingredients.some((item) => !item.name.trim() || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)) return 'Every ingredient needs a name and a quantity greater than zero.';
     if (!draft.directions.length || draft.directions.some((step) => !step.instruction.trim())) return 'Every cooking step needs an instruction.';
     if (draft.directions.some((step) => [step.timer_hours, step.timer_minutes, step.timer_seconds].some((value) => !Number.isInteger(Number(value)) || Number(value) < 0)) || draft.directions.some((step) => Number(step.timer_minutes) > 59 || Number(step.timer_seconds) > 59)) return 'Timer values must be valid whole numbers; minutes and seconds cannot exceed 59.';
@@ -397,7 +411,7 @@
         <div class="detail-topbar"><a class="back-link" href="#/">← All recipes</a><div class="detail-actions"><button class="button button-secondary" type="button" data-duplicate="${U.escapeHTML(recipe.id)}">Duplicate</button><a class="button button-secondary" href="#/edit/${U.escapeHTML(recipe.id)}">Edit</a><button class="button button-danger" type="button" data-delete="${U.escapeHTML(recipe.id)}">Delete</button></div></div>
         <header class="recipe-hero">
           <div class="recipe-hero-copy"><div><span class="category-pill">${U.escapeHTML(recipe.category || 'Uncategorized')}</span>${recipe.is_favorite ? '<span class="favorite-label">♥ Favorite</span>' : ''}</div><h1>${U.escapeHTML(recipe.title)}</h1>${recipe.description ? `<p>${U.escapeHTML(recipe.description)}</p>` : ''}
-            <div class="hero-meta"><div><span>Prep</span><strong>${U.formatMinutes(recipe.prep_minutes)}</strong></div><div><span>Cook</span><strong>${U.formatMinutes(recipe.cook_minutes)}</strong></div><div><span>Total</span><strong>${U.formatMinutes(totalTime)}</strong></div></div>
+            <div class="hero-meta"><div><span>Total time</span><strong>${U.formatMinutes(totalTime)}</strong></div></div>
           </div>
           <div class="recipe-hero-image ${recipe.image_url ? '' : 'image-placeholder'}">${recipe.image_url ? `<img src="${U.escapeHTML(recipe.image_url)}" alt="${U.escapeHTML(recipe.title)}">` : '<span aria-hidden="true">♨</span>'}</div>
         </header>
@@ -502,6 +516,9 @@
   async function handleRecipeSubmit(form) {
     if (state.submitting) return;
     syncDraftFromForm();
+    if (state.formDraft.total_cost !== '' && state.formDraft.actual_servings === '') {
+      state.formDraft.actual_servings = state.formDraft.default_servings;
+    }
     const errorMessage = validateDraft(state.formDraft);
     if (errorMessage) { toast(errorMessage, 'error'); return; }
     state.submitting = true;
@@ -573,7 +590,8 @@
   function exportBackup() {
     const safeRecipes = state.recipes.map((recipe) => ({
       title: recipe.title, description: recipe.description, category: recipe.category,
-      prep_minutes: recipe.prep_minutes, cook_minutes: recipe.cook_minutes,
+      total_minutes: Number(recipe.prep_minutes || 0) + Number(recipe.cook_minutes || 0),
+      prep_minutes: 0, cook_minutes: Number(recipe.prep_minutes || 0) + Number(recipe.cook_minutes || 0),
       default_servings: recipe.default_servings, notes: recipe.notes,
       total_cost: recipe.total_cost, actual_servings: recipe.actual_servings,
       cost_notes: recipe.cost_notes, is_favorite: recipe.is_favorite,
@@ -603,6 +621,9 @@
           ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
           directions: Array.isArray(recipe.directions) ? recipe.directions : []
         };
+        if (recipe.total_minutes === undefined) {
+          draft.total_minutes = Number(recipe.prep_minutes || 0) + Number(recipe.cook_minutes || 0);
+        }
         draft.directions = draft.directions.map((step) => {
           const seconds = Math.max(0, Number(step.timer_seconds) || 0);
           return {
@@ -638,6 +659,16 @@
     if (event.target.id === 'recipe-form') { event.preventDefault(); handleRecipeSubmit(event.target); }
   });
 
+  document.addEventListener('keydown', (event) => {
+    const form = event.target.closest?.('#recipe-form');
+    if (!form || event.key !== 'Enter' || event.target.matches('textarea, button, [type="submit"]')) return;
+    event.preventDefault();
+    const fields = [...form.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]), select, textarea')]
+      .filter((field) => !field.disabled && field.offsetParent !== null);
+    const nextField = fields[fields.indexOf(event.target) + 1];
+    if (nextField) nextField.focus();
+  });
+
   document.addEventListener('input', (event) => {
     if (event.target.id === 'recipe-search') {
       state.search = event.target.value;
@@ -646,11 +677,24 @@
       const search = document.getElementById('recipe-search');
       search.focus(); search.setSelectionRange(currentFocus, currentFocus);
     }
-    if (event.target.closest('.cost-fields')) {
+    const recipeForm = event.target.closest('#recipe-form');
+    if (recipeForm && event.target.name === 'total_cost') {
+      const servingsInput = recipeForm.elements.actual_servings;
+      if (event.target.value !== '' && servingsInput.value === '') {
+        servingsInput.value = recipeForm.elements.default_servings.value;
+        recipeForm.dataset.autoCostServings = 'true';
+      } else if (event.target.value === '' && recipeForm.dataset.autoCostServings === 'true') {
+        servingsInput.value = '';
+        delete recipeForm.dataset.autoCostServings;
+      }
+    }
+    if (recipeForm && event.target.name === 'actual_servings') delete recipeForm.dataset.autoCostServings;
+    if (recipeForm && event.target.name === 'default_servings' && recipeForm.dataset.autoCostServings === 'true') {
+      recipeForm.elements.actual_servings.value = event.target.value;
+    }
+    if (recipeForm && (event.target.closest('.cost-fields') || event.target.name === 'default_servings')) {
       const form = document.getElementById('recipe-form');
-      const cost = Number(form.elements.total_cost.value);
-      const servings = Number(form.elements.actual_servings.value);
-      document.getElementById('cost-preview').textContent = form.elements.total_cost.value !== '' && form.elements.actual_servings.value !== '' && cost >= 0 && servings > 0 ? U.formatCurrency(cost / servings) : 'Cost not entered';
+      document.getElementById('cost-preview').textContent = costPreviewText(form.elements.total_cost.value, form.elements.actual_servings.value);
     }
   });
 
