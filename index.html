@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#d65f3f">
+    <meta name="description" content="A private, synchronized recipe library for every screen.">
+    <title>Recipe Keeper</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem('recipe-theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#app">Skip to content</a>
+    <div id="offline-banner" class="offline-banner" hidden>You are offline. Saved recipes cannot sync right now.</div>
+    <header id="site-header" class="site-header" hidden>
+      <a class="brand" href="#/" aria-label="Recipe Keeper home">
+        <span class="brand-mark" aria-hidden="true">R</span>
+        <span>Recipe Keeper</span>
+      </a>
+      <nav class="header-actions" aria-label="Main navigation">
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch color theme" title="Switch color theme">☾</button>
+        <button id="sign-out-button" class="button button-quiet" type="button">Sign out</button>
+      </nav>
+    </header>
+
+    <main id="app" tabindex="-1">
+      <div class="page-loading" role="status"><span class="spinner"></span> Loading Recipe Keeper…</div>
+    </main>
+
+    <aside id="global-timers" class="global-timers" aria-label="Active cooking timers" hidden></aside>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="./vendor/supabase.js" defer></script>
+    <script src="./js/config.js" defer></script>
+    <script src="./js/utils.js" defer></script>
+    <script src="./js/database.js" defer></script>
+    <script src="./js/timers.js" defer></script>
+    <script src="./js/app.js" defer></script>
+  </body>
+</html>
